@@ -53,6 +53,10 @@ def readcalib(gain_dict,offset_dict,corr_dict):
         offset_dict[mykey] = offset
     corrfile = open("adccorr.txt","r")
     lines = corrfile.readlines()
+    ii = 0
+    kk = 0
+    kksum = 0
+    kkdiv = 0
     for line in lines:
           if ("***" in line or "Row" in line): continue
           cols = line.split()
@@ -65,6 +69,25 @@ def readcalib(gain_dict,offset_dict,corr_dict):
           corr = mean - (code*gain + offset)
           mykey = chip+"_"+chan+"_"+str(code)
           corr_dict[mykey] = corr
+          if (abs(corr)<20):
+                kksum += corr
+                kkdiv += 1
+          else:
+                kksum += 0
+          kk += 1
+          if (kk == 64):
+                mykey2 = chip+"_"+chan+"_calib64_bin"+str(ii)
+                if (kkdiv==0):
+                      corr_dict[mykey2] = 0
+                else:
+                      corr_dict[mykey2] = kksum/kkdiv
+                kk = 0
+                kksum = 0
+                kkdiv = 0
+                if (ii==63):
+                      ii = 0
+                else:
+                      ii += 1
     calibfile.close()
     corrfile.close()
     return
@@ -73,14 +96,19 @@ def readcalib(gain_dict,offset_dict,corr_dict):
 nrand = int(sys.argv[1])
 myrange = float(sys.argv[2])
 myrangepc = str(int(100.*myrange))
-calibtype = sys.argv[3] # 'linear', 'full'
+calibtype = sys.argv[3] # 'linear', 'full', '64bin'
+baseline = int(sys.argv[4])
 
 if (calibtype == 'linear'):
       calibtext = "mV (Linear Calibration)"
 elif (calibtype == 'full'):
       calibtext = "mV (Full Calibration)"
+elif (calibtype == '64bin'):
+      calibtext = "mV (64-bin Nonlinear Calibration)"
 else:
       raise Exception("Calibration type must be linear or full")
+
+bltext = str(baseline)+"mv"
 
 
 #Set threshold, etc
@@ -90,7 +118,6 @@ threshold = 4 #mV
 
 collfile = "waveforms/angle0coll/event1/chan10430.txt"
 #collfile = "waveforms/angle0coll/event1/chan10530.txt"
-baseline = 200
 
 mypulsefile = open(collfile,"r")
 lines = mypulsefile.readlines()
@@ -184,18 +211,23 @@ while it < nrand:
     mykey = chip+"_"+chan
     gain = gain_dict[mykey]
     offset = offset_dict[mykey]
-    
+
     #Do stuff to waveform
     for mv in waveform_copy:
         ybin = resp_hist.GetYaxis().FindBin(mv)
         projx = resp_hist.ProjectionX("projx",ybin,ybin)
         myadc = int(projx.GetRandom())
-        codekey = mykey+"_"+str(myadc)
-        calibcorr = corr_dict[codekey]
         mymv_linear = myadc*gain + offset
         if (calibtype == 'linear'):
               mymv_corr = mymv_linear
         elif (calibtype == 'full'):
+              codekey = mykey+"_"+str(myadc)
+              calibcorr = corr_dict[codekey]
+              mymv_corr = mymv_linear + calibcorr
+        elif (calibtype == '64bin'):
+              codebin = int(myadc/64)
+              codekey = mykey+"_calib64_bin"+str(codebin)
+              calibcorr = corr_dict[codekey]              
               mymv_corr = mymv_linear + calibcorr
         waveform_distort.append(mymv_corr)
         if (myadc%64 == 0 or myadc%64 == 63):
@@ -371,7 +403,7 @@ h1.GetYaxis().SetTitleOffset(1.2)
 h1.GetYaxis().SetTitle(calibtext)
 h1.GetXaxis().SetLabelSize(0.03)
 h1.GetYaxis().SetLabelSize(0.03)
-h1.SetTitle("Remove Poor/Bad Chips")
+h1.SetTitle("Selected Chips")
 g_pulse_distort_maxband.Draw("Fsame")
 g_pulse_distort_band.Draw("Fsame")
 g_pulse_orig.Draw("LPsame")
@@ -383,7 +415,7 @@ l1.SetBorderSize(0)
 l1.SetFillStyle(0)
 l1.Draw("same")
 c1.RedrawAxis()
-c1.SaveAs("plots/waveform_overlay1_"+calibtype+".png")
+c1.SaveAs("plots/waveform_overlay1_"+calibtype+"_"+bltext+".png")
 
 g_pulse_distort_removeall_band = filldiff(g_pulse_distort_removeall_1sighi,g_pulse_distort_removeall_1siglo)
 g_pulse_distort_removeall_maxband = filldiff(g_pulse_distort_removeall_hiall,g_pulse_distort_removeall_loall)
@@ -407,7 +439,7 @@ g_pulse_distort_removeall_band.Draw("Fsame")
 g_pulse_orig.Draw("LPsame")
 l1.Draw("same")
 c2.RedrawAxis()
-c2.SaveAs("plots/waveform_overlay2_"+calibtype+".png")
+c2.SaveAs("plots/waveform_overlay2_"+calibtype+"_"+bltext+".png")
 
 g_pulse_distort_removebad_band = filldiff(g_pulse_distort_removebad_1sighi,g_pulse_distort_removebad_1siglo)
 g_pulse_distort_removebad_maxband = filldiff(g_pulse_distort_removebad_hiall,g_pulse_distort_removebad_loall)
@@ -431,7 +463,7 @@ g_pulse_distort_removebad_band.Draw("Fsame")
 g_pulse_orig.Draw("LPsame")
 l1.Draw("same")
 c3.RedrawAxis()
-c3.SaveAs("plots/waveform_overlay3_"+calibtype+".png")
+c3.SaveAs("plots/waveform_overlay3_"+calibtype+"_"+bltext+".png")
 
 g_pulse_distort_interp_band = filldiff(g_pulse_distort_interp_1sighi,g_pulse_distort_interp_1siglo)
 g_pulse_distort_interp_maxband = filldiff(g_pulse_distort_interp_hiall,g_pulse_distort_interp_loall)
@@ -455,7 +487,7 @@ g_pulse_distort_interp_band.Draw("Fsame")
 g_pulse_orig.Draw("LPsame")
 l1.Draw("same")
 c4.RedrawAxis()
-c4.SaveAs("plots/waveform_overlay4_"+calibtype+".png")
+c4.SaveAs("plots/waveform_overlay4_"+calibtype+"_"+bltext+".png")
 
 c5 = ROOT.TCanvas("c5","c5",800,800)
 h_peak_to_baseline.SetLineWidth(3)
@@ -468,18 +500,18 @@ c6 = ROOT.TCanvas("c6","c6",800,800)
 h_peak_to_baseline_diff.SetLineWidth(3)
 h_peak_to_baseline_diff.GetXaxis().SetTitle("Peak-Baseline Difference (mV) (True-Distorted)")
 h_peak_to_baseline_diff.Draw()
-c6.SaveAs("plots/peak_to_baseline_diff_"+calibtype+".png")
+c6.SaveAs("plots/peak_to_baseline_diff_"+calibtype+"_"+bltext+".png")
 
 c7 = ROOT.TCanvas("c7","c7",800,800)
 h_int_under_pulse.SetLineWidth(3)
 h_int_under_pulse.GetXaxis().SetTitle("Integral Under Pulse (mV)")
 h_int_under_pulse.Draw()
-c7.SaveAs("plots/int_under_pulse_"+calibtype+".png")
+c7.SaveAs("plots/int_under_pulse_"+calibtype+"_"+bltext+".png")
 
 c8 = ROOT.TCanvas("c8","c8",800,800)
 h_int_under_pulse_diff.SetLineWidth(3)
 h_int_under_pulse_diff.GetXaxis().SetTitle("Integral Under Pulse Difference (mV) (True-Distorted)")
 h_int_under_pulse_diff.Draw()
-c8.SaveAs("plots/int_under_pulse_diff_"+calibtype+".png")
+c8.SaveAs("plots/int_under_pulse_diff_"+calibtype+"_"+bltext+".png")
 
 
